@@ -209,8 +209,9 @@ async function streamCRL(response) {
   const chunks = []
   let totalBytes = 0
   
-  // Maximum size increased from original 5MB to 50MB with streaming approach
-  const MAX_TOTAL_SIZE = 50 * 1024 * 1024 // 50MB
+  // Maximum size: Conservative limit to ensure we stay well within Workers memory constraints
+  // Cloudflare Workers have 128MB memory limit; we use 25MB to leave room for parsing overhead
+  const MAX_TOTAL_SIZE = 25 * 1024 * 1024 // 25MB
   
   try {
     while (true) {
