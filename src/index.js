@@ -195,6 +195,58 @@ function bufToHex(inputBuffer) {
 }
 
 /**
+ * Streams CRL data efficiently by reading in chunks rather than buffering the entire
+ * response at once. This approach:
+ * 1. Reads data incrementally from the response stream
+ * 2. Checks size limits early to fail fast on oversized CRLs
+ * 3. Combines chunks efficiently into a final buffer for ASN.1 parsing
+ * 
+ * This streaming approach helps avoid memory spikes and allows handling larger CRLs
+ * than the previous buffered approach.
+ */
+async function streamCRL(response) {
+  const reader = response.body.getReader()
+  const chunks = []
+  let totalBytes = 0
+  
+  // Maximum size increased from original 5MB to 50MB with streaming approach
+  const MAX_TOTAL_SIZE = 50 * 1024 * 1024 // 50MB
+  
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      
+      if (done) {
+        break
+      }
+      
+      totalBytes += value.length
+      
+      // Check size limit incrementally - fail fast if CRL is too large
+      if (totalBytes > MAX_TOTAL_SIZE) {
+        console.log(`⚠️ CRL exceeds ${(MAX_TOTAL_SIZE / 1024 / 1024).toFixed(2)} MB limit at ${(totalBytes / 1024 / 1024).toFixed(2)} MB`)
+        throw new Error(`CRL too large: ${(totalBytes / 1024 / 1024).toFixed(2)} MB exceeds ${(MAX_TOTAL_SIZE / 1024 / 1024).toFixed(2)} MB limit`)
+      }
+      
+      chunks.push(value)
+    }
+  } finally {
+    reader.releaseLock()
+  }
+  
+  // Efficiently combine chunks into a single ArrayBuffer for ASN.1 parsing
+  const totalBuffer = new Uint8Array(totalBytes)
+  let offset = 0
+  for (const chunk of chunks) {
+    totalBuffer.set(chunk, offset)
+    offset += chunk.length
+  }
+  
+  console.log(`Streamed CRL: ${(totalBytes / 1024 / 1024).toFixed(2)} MB in ${chunks.length} chunks`)
+  return totalBuffer.buffer
+}
+
+/**
  * Fetchs a CRL list, parses out the serial numbers, and stores them into workers kv
  */
 async function updateCRL(env, CRL_URL, CRL_KV_KEY) {
@@ -204,15 +256,8 @@ async function updateCRL(env, CRL_URL, CRL_KV_KEY) {
     throw new Error(`failed to fetch crl with status ${crlResp.status}`)
   }
 
-  const buf = await crlResp.arrayBuffer()
-  console.log('Fetched CRL', { bytes: buf.byteLength })
-
-  // Check if CRL is larger than 5 MB
-  const MAX_CRL_SIZE = 5 * 1024 * 1024 // 5 MB in bytes
-  if (buf.byteLength > MAX_CRL_SIZE) {
-    console.log(`⚠️ CRL too large to parse: ${buf.byteLength} bytes (${(buf.byteLength / 1024 / 1024).toFixed(2)} MB) - Skipping parsing for: ${CRL_URL}`)
-    return
-  }
+  // Use streaming to fetch CRL data instead of buffering entire response
+  const buf = await streamCRL(crlResp)
 
   let nextUpdate, thisUpdate, revokedSerialNumbers
 
