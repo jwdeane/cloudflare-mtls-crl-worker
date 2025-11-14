@@ -69,6 +69,13 @@ zone_name = "<ZONE_ID>"
 - **Optional**: `FORCE_CRL_REFRESH_HEADER` (enable in code if desired)
 - **Output**: `X-Client-Cert-CRL-URLs` (comma-separated list)
 
+## CRL Processing
+- **Streaming Implementation**: CRLs are downloaded using streaming to efficiently handle large files
+- **Size Limit**: CRLs up to 25MB are supported (increased from previous 5MB limit)
+- **Memory Efficient**: Uses incremental reading to avoid memory spikes and stay within Cloudflare Workers limits
+- **Fail Fast**: Automatically rejects CRLs exceeding 25MB before consuming excessive memory
+- **Storage**: Only parsed metadata (nextUpdate, thisUpdate, revoked serial numbers) is stored in KV
+
 ## Error status codes
 - **560**: `client CN allowlist not configured` in `verifyClientCNAgainstAllowlist()` when no allowlist map exists for `host`.
 - **561**: `client certificate not allowed` when the extracted CN is not present/true in the allowlist.
